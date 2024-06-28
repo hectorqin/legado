@@ -303,9 +303,7 @@ class ReadBookActivity : BaseReadBookActivity(),
         if (bookChanged) {
             bookChanged = false
             ReadBook.callBack = this
-            viewModel.initData(intent) {
-                upMenu()
-            }
+            viewModel.initData(intent)
         } else {
             //web端阅读时，app处于阅读界面，本地记录会覆盖web保存的进度，在此处恢复
             ReadBook.webBookProgress?.let {
@@ -1304,7 +1302,7 @@ class ReadBookActivity : BaseReadBookActivity(),
         when (dialogId) {
             TEXT_COLOR -> {
                 setCurTextColor(color)
-                postEvent(EventBus.UP_CONFIG, arrayListOf(2, 9, 11))
+                postEvent(EventBus.UP_CONFIG, arrayListOf(2, 6, 9, 11))
             }
 
             BG_COLOR -> {
@@ -1500,9 +1498,9 @@ class ReadBookActivity : BaseReadBookActivity(),
                     5 -> if (isInitFinish) ReadBook.loadContent(resetPageOffset = false)
                     6 -> readView.upContent(resetPageOffset = false)
                     8 -> ChapterProvider.upStyle()
-                    9 -> binding.readView.invalidateTextPage()
+                    9 -> readView.invalidateTextPage()
                     10 -> ChapterProvider.upLayout()
-                    11 -> binding.readView.submitRenderTask()
+                    11 -> readView.submitRenderTask()
                 }
             }
         }
@@ -1543,10 +1541,10 @@ class ReadBookActivity : BaseReadBookActivity(),
             viewModel.searchResultList = it
         }
         observeEvent<Boolean>(EventBus.UPDATE_READ_ACTION_BAR) {
-            binding.readMenu.reset()
+            readMenu.reset()
         }
         observeEvent<Boolean>(EventBus.UP_SEEK_BAR) {
-            binding.readMenu.upSeekBar()
+            readMenu.upSeekBar()
         }
     }
 

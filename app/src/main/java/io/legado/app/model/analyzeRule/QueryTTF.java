@@ -648,6 +648,8 @@ public class QueryTTF {
         var reader = new BufferReader(buffer, dataTable.offset);
         if (head.indexToLocFormat == 0) {
             loca = reader.ReadUInt16Array(dataTable.length / 2);
+            // 当loca表数据长度为Uint16时,需要翻倍
+            for (var i = 0; i < loca.length; i++) loca[i] *= 2;
         } else {
             loca = reader.ReadInt32Array(dataTable.length / 4);
         }
@@ -683,6 +685,7 @@ public class QueryTTF {
                     int unicodeInclusive = 0;
                     int unicodeExclusive = f.glyphIdArray.length;
                     for (; unicodeInclusive < unicodeExclusive; unicodeInclusive++) {
+                        if (f.glyphIdArray[unicodeInclusive] == 0) continue; // 排除轮廓索引为0的Unicode
                         unicodeToGlyphId.put(unicodeInclusive, f.glyphIdArray[unicodeInclusive]);
                     }
                     break;
@@ -709,12 +712,15 @@ public class QueryTTF {
                         int idDelta = f.idDelta[segmentIndex];
                         int idRangeOffset = f.idRangeOffsets[segmentIndex];
                         for (int unicode = unicodeInclusive; unicode <= unicodeExclusive; unicode++) {
+                            int glyphId = 0;
                             if (idRangeOffset == 0) {
-                                unicodeToGlyphId.put(unicode, (unicode + idDelta) & 0xFFFF);
+                                glyphId = (unicode + idDelta) & 0xFFFF;
                             } else {
-                                int gIndex = (idRangeOffset / 2) + unicode - unicodeInclusive + segmentIndex;
-                                unicodeToGlyphId.put(unicode, gIndex < glyphIdArrayLength ? f.glyphIdArray[gIndex] + idDelta : 0);
+                                int gIndex = (idRangeOffset / 2) + unicode - unicodeInclusive + segmentIndex - segCount;
+                                if (gIndex < glyphIdArrayLength) glyphId = f.glyphIdArray[gIndex] + idDelta;
                             }
+                            if (glyphId == 0) continue; // 排除轮廓索引为0的Unicode
+                            unicodeToGlyphId.put(unicode, glyphId);
                         }
                     }
                     break;
@@ -771,21 +777,24 @@ public class QueryTTF {
         var dataTable = directorys.get("glyf");
         assert dataTable != null;
         int glyfCount = maxp.numGlyphs;
-        glyfArray = new GlyfLayout[glyfCount + 1];  // 创建容器时，多创建一个作为保留区
+        glyfArray = new GlyfLayout[glyfCount];  // 创建字形容器
 
         var reader = new BufferReader(buffer, 0);
-        for (int index = 1; index <= glyfCount; index++) {
-            if (loca[index - 1] == loca[index]) continue;   // 当前loca与下一个loca相同，表示这个字形不存在
-            int offset = dataTable.offset + loca[index - 1];
+        for (int index = 0; index < glyfCount; index++) {
+            if (loca[index] == loca[index + 1]) continue;   // 当前loca与下一个loca相同，表示这个字形不存在
+            int offset = dataTable.offset + loca[index];
             // 读GlyphHeaders
             var glyph = new GlyfLayout();
             reader.position(offset);
             glyph.numberOfContours = reader.ReadInt16();
+            if (glyph.numberOfContours > maxp.maxContours) continue; // 如果字形轮廓数大于非复合字形中包含的最大轮廓数，则说明该字形无效。
             glyph.xMin = reader.ReadInt16();
             glyph.yMin = reader.ReadInt16();
             glyph.xMax = reader.ReadInt16();
             glyph.yMax = reader.ReadInt16();
 
+            // 轮廓数为0时，不需要解析轮廓数据
+            if (glyph.numberOfContours == 0) continue;
             // 读Glyph轮廓数据
             if (glyph.numberOfContours > 0) {
                 // 简单轮廓
@@ -888,7 +897,7 @@ public class QueryTTF {
                     if ((glyphTableComponent.flags & 0x20) == 0) break;
                 }
             }
-            glyfArray[index] = glyph;   // 根据文档 glyfId=0 作为保留区使用，这里赋值从索引1开始
+            glyfArray[index] = glyph;
         }
     }
 
@@ -914,7 +923,15 @@ public class QueryTTF {
             // 复合字形
             LinkedList<String> glyphIdList = new LinkedList<>();
             for (var g : glyph.glyphComponent) {
-                glyphIdList.add(String.valueOf(g.glyphIndex));
+                glyphIdList.add("{" +
+                        "flags:" + g.flags + "," +
+                        "glyphIndex:" + g.glyphIndex + "," +
+                        "arg1:" + g.argument1 + "," +
+                        "arg2:" + g.argument2 + "," +
+                        "xScale:" + g.xScale + "," +
+                        "scale01:" + g.scale01 + "," +
+                        "scale10:" + g.scale10 + "," +
+                        "yScale:" + g.yScale + "}");
             }
             glyphString = "[" + String.join(",", glyphIdList) + "]";
         }
@@ -960,10 +977,11 @@ public class QueryTTF {
         int glyfArrayLength = glyfArray.length;
         for (var item : unicodeToGlyphId.entrySet()) {
             int key = item.getKey();
-            int val = item.getValue() + 1;  // glyphArray已根据TTF文档将索引0作为保留位，这里从1开始索引
+            int val = item.getValue();
             if (val >= glyfArrayLength) continue;
             String glyfString = getGlyfById(val);
             unicodeToGlyph.put(key, glyfString);
+            if (glyfString == null) continue;   // null 不能用作hashmap的key
             glyphToUnicode.put(glyfString, key);
         }
 //        Log.i("QueryTTF", "字体处理完成");
@@ -981,8 +999,8 @@ public class QueryTTF {
      */
     public int getGlyfIdByUnicode(int unicode) {
         var result = unicodeToGlyphId.get(unicode);
-        if (result == null) return 0;
-        return result + 1; // 根据TTF文档，轮廓索引的定义从1开始
+        if (result == null) return 0; // 如果找不到Unicode对应的轮廓索引，就返回默认值0
+        return result;
     }
 
     /**
@@ -1003,7 +1021,7 @@ public class QueryTTF {
      */
     public int getUnicodeByGlyf(String glyph) {
         var result = glyphToUnicode.get(glyph);
-        if (result == null) return 0;
+        if (result == null) return 0; // 如果轮廓数据找不到对应的Unicode，就返回默认值0
         return result;
     }
 

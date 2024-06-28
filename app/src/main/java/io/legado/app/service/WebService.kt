@@ -7,7 +7,6 @@ import android.net.wifi.WifiManager
 import android.os.Build
 import android.os.PowerManager
 import androidx.core.app.NotificationCompat
-import androidx.core.content.ContextCompat
 import io.legado.app.R
 import io.legado.app.base.BaseService
 import io.legado.app.constant.AppConst
@@ -23,6 +22,7 @@ import io.legado.app.utils.postEvent
 import io.legado.app.utils.printOnDebug
 import io.legado.app.utils.sendToClip
 import io.legado.app.utils.servicePendingIntent
+import io.legado.app.utils.startForegroundServiceCompat
 import io.legado.app.utils.startService
 import io.legado.app.utils.stopService
 import io.legado.app.utils.toastOnUi
@@ -45,7 +45,7 @@ class WebService : BaseService() {
 
         fun startForeground(context: Context) {
             val intent = Intent(context, WebService::class.java)
-            ContextCompat.startForegroundService(context, intent)
+            context.startForegroundServiceCompat(intent)
         }
 
         fun stop(context: Context) {
@@ -94,14 +94,19 @@ class WebService : BaseService() {
             val addressList = NetworkUtils.getLocalIPAddress()
             notificationList.clear()
             if (addressList.any()) {
-                notificationList.addAll(addressList.map { address -> getString(R.string.http_ip, address.hostAddress, getPort()) })
+                notificationList.addAll(addressList.map { address ->
+                    getString(
+                        R.string.http_ip,
+                        address.hostAddress,
+                        getPort()
+                    )
+                })
                 hostAddress = notificationList.first()
-                startForegroundNotification()
             } else {
                 hostAddress = getString(R.string.network_connection_unavailable)
                 notificationList.add(hostAddress)
-                startForegroundNotification()
             }
+            startForegroundNotification()
             postEvent(EventBus.WEB_SERVICE, hostAddress)
         }
     }
@@ -155,7 +160,13 @@ class WebService : BaseService() {
                 httpServer?.start()
                 webSocketServer?.start(1000 * 30) // 通信超时设置
                 notificationList.clear()
-                notificationList.addAll(addressList.map { address -> getString(R.string.http_ip, address.hostAddress, getPort()) })
+                notificationList.addAll(addressList.map { address ->
+                    getString(
+                        R.string.http_ip,
+                        address.hostAddress,
+                        getPort()
+                    )
+                })
                 hostAddress = notificationList.first()
                 isRun = true
                 postEvent(EventBus.WEB_SERVICE, hostAddress)
@@ -184,6 +195,7 @@ class WebService : BaseService() {
      */
     override fun startForegroundNotification() {
         val builder = NotificationCompat.Builder(this, AppConst.channelIdWeb)
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .setSmallIcon(R.drawable.ic_web_service_noti)
             .setOngoing(true)
             .setContentTitle(getString(R.string.web_service))
@@ -196,7 +208,6 @@ class WebService : BaseService() {
             getString(R.string.cancel),
             servicePendingIntent<WebService>(IntentAction.stop)
         )
-        builder.setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
         val notification = builder.build()
         startForeground(NotificationId.WebService, notification)
     }
